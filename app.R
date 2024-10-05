@@ -1,16 +1,15 @@
-# Set working directory (if necessary)
-# setwd("C:/Users/rahul/Downloads/project")
-
 # Install necessary libraries if not already installed
 if (!require(shiny)) install.packages('shiny', dependencies=TRUE)
 if (!require(ggplot2)) install.packages('ggplot2', dependencies=TRUE)
 if (!require(lubridate)) install.packages('lubridate', dependencies=TRUE)
+if (!require(plotly)) install.packages('plotly', dependencies=TRUE)
 
 library(shiny)
 library(ggplot2)
 library(lubridate)
+library(plotly)
 
-# Load the temperature, precipitation, and multilinear models from the 'models' folder
+# Load the temperature, precipitation, and multilinear models
 temp_model <- readRDS("models/temp_model.rds")
 precip_model <- readRDS("models/precip_model.rds")
 multi_model <- readRDS("models/multi_model.rds")
@@ -48,7 +47,7 @@ predict_both <- function(date) {
   new_data <- data.frame(Year = year, Month = month, DayOfYear = day_of_year)
   prediction <- predict(multi_model, new_data)
   
-  return(list(temperature = prediction[, 1], precipitation = prediction[, 2]))
+  return(list(temperature = prediction[1], precipitation = prediction[2]))
 }
 
 # Define UI
@@ -56,11 +55,12 @@ ui <- fluidPage(
   titlePanel("Weather Prediction Dashboard"),
   sidebarLayout(
     sidebarPanel(
-      dateInput("dateInput", 
-                "Select a Date:", 
-                value = Sys.Date(),
-                min = as.Date("2000-01-01"),
-                max = as.Date("2030-12-31")),
+      dateRangeInput("dateRange", 
+                     "Select Date Range:", 
+                     start = Sys.Date() - 30, 
+                     end = Sys.Date(),
+                     min = as.Date("2000-01-01"),
+                     max = as.Date("2030-12-31")),
       selectInput("predictionType", 
                   "Select Prediction Type:", 
                   choices = c("Temperature", "Precipitation", "Both")),
@@ -69,8 +69,8 @@ ui <- fluidPage(
     mainPanel(
       h3("Prediction Results"),
       verbatimTextOutput("predictionOutput"),
-      plotOutput("tempPlot"),
-      plotOutput("precipPlot")
+      plotlyOutput("tempPlot"),
+      plotlyOutput("precipPlot")
     )
   )
 )
@@ -81,60 +81,79 @@ server <- function(input, output) {
   predictions <- reactive({
     req(input$predict)  # Ensure the action button is pressed
     
-    selected_date <- input$dateInput
+    selected_dates <- seq(input$dateRange[1], input$dateRange[2], by = "day")
     prediction_type <- input$predictionType
     
-    # Switch based on the selected prediction type
-    if (prediction_type == "Temperature") {
-      predicted_temp <- predict_temperature(selected_date)
-      return(list(temperature = predicted_temp, precipitation = NULL))
+    # Initialize empty lists for storing predictions
+    temp_preds <- numeric(length(selected_dates))
+    precip_preds <- numeric(length(selected_dates))
+    
+    for (i in seq_along(selected_dates)) {
+      date <- selected_dates[i]
       
-    } else if (prediction_type == "Precipitation") {
-      predicted_precip <- predict_precipitation(selected_date)
-      return(list(temperature = NULL, precipitation = predicted_precip))
-      
-    } else if (prediction_type == "Both") {
-      predicted_both <- predict_both(selected_date)
-      return(list(temperature = predicted_both$temperature, precipitation = predicted_both$precipitation))
+      # Switch based on the selected prediction type
+      if (prediction_type == "Temperature") {
+        temp_preds[i] <- predict_temperature(date)
+        
+      } else if (prediction_type == "Precipitation") {
+        precip_preds[i] <- predict_precipitation(date)
+        
+      } else if (prediction_type == "Both") {
+        both_preds <- predict_both(date)
+        temp_preds[i] <- both_preds$temperature
+        precip_preds[i] <- both_preds$precipitation
+      }
     }
+    
+    return(list(dates = selected_dates, temperature = temp_preds, precipitation = precip_preds))
   })
   
   output$predictionOutput <- renderPrint({
     req(predictions())
     pred <- predictions()
     
-    if (!is.null(pred$temperature)) {
-      cat("Predicted Temperature: ", round(pred$temperature, 2), "°C\n")
+    if (input$predictionType == "Temperature" || input$predictionType == "Both") {
+      cat("Temperature Predictions:\n")
+      print(data.frame(Date = pred$dates, Temperature = round(pred$temperature, 2)))
     }
     
-    if (!is.null(pred$precipitation)) {
-      cat("Predicted Precipitation: ", round(pred$precipitation, 2), "mm\n")
+    if (input$predictionType == "Precipitation" || input$predictionType == "Both") {
+      cat("Precipitation Predictions:\n")
+      print(data.frame(Date = pred$dates, Precipitation = round(pred$precipitation, 2)))
     }
   })
   
-  output$tempPlot <- renderPlot({
+  output$tempPlot <- renderPlotly({
     req(predictions())
     pred <- predictions()
     
-    if (!is.null(pred$temperature)) {
-      ggplot(data.frame(Date = input$dateInput, Temperature = pred$temperature), aes(x = Date, y = Temperature)) +
+    if (input$predictionType == "Temperature" || input$predictionType == "Both") {
+      temp_data <- data.frame(Date = pred$dates, Temperature = pred$temperature)
+      
+      p <- ggplot(temp_data, aes(x = Date, y = Temperature)) +
         geom_line(color = "blue") +
         geom_point(size = 3, color = "blue") +
-        labs(title = "Predicted Temperature", x = "Date", y = "Temperature (°C)") +
+        labs(title = "Predicted Temperature Over Time", x = "Date", y = "Temperature (°C)") +
         theme_minimal()
+      
+      ggplotly(p)
     }
   })
   
-  output$precipPlot <- renderPlot({
+  output$precipPlot <- renderPlotly({
     req(predictions())
     pred <- predictions()
     
-    if (!is.null(pred$precipitation)) {
-      ggplot(data.frame(Date = input$dateInput, Precipitation = pred$precipitation), aes(x = Date, y = Precipitation)) +
+    if (input$predictionType == "Precipitation" || input$predictionType == "Both") {
+      precip_data <- data.frame(Date = pred$dates, Precipitation = pred$precipitation)
+      
+      p <- ggplot(precip_data, aes(x = Date, y = Precipitation)) +
         geom_line(color = "green") +
         geom_point(size = 3, color = "green") +
-        labs(title = "Predicted Precipitation", x = "Date", y = "Precipitation (mm)") +
+        labs(title = "Predicted Precipitation Over Time", x = "Date", y = "Precipitation (mm)") +
         theme_minimal()
+      
+      ggplotly(p)
     }
   })
   
@@ -142,3 +161,4 @@ server <- function(input, output) {
 
 # Run the application 
 shinyApp(ui = ui, server = server)
+
