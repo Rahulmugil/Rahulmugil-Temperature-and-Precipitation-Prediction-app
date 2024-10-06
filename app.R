@@ -52,7 +52,7 @@ predict_both <- function(date) {
 
 # Define UI
 ui <- fluidPage(
-  titlePanel("Weather Prediction Dashboard"),
+  titlePanel("Temperature and Precipitation Prediction Dashboard"),
   sidebarLayout(
     sidebarPanel(
       dateRangeInput("dateRange", 
